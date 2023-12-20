@@ -2,10 +2,10 @@
 import sys
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTableView, QDialog, QVBoxLayout, QHBoxLayout, QMessageBox, QFileDialog
 from PyQt5.QtGui import QFont
-from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex
+from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QItemSelectionModel, QMimeData
 import pandas as pd
 import matplotlib.pyplot as plt
-from PyQt5.QtWidgets import QPushButton, QWidget, QLineEdit, QInputDialog
+from PyQt5.QtWidgets import QPushButton, QWidget, QLineEdit, QInputDialog, QMenu, QAction
 
 
 class ExcelTableModel(QAbstractTableModel):
@@ -36,6 +36,10 @@ class ExcelTableModel(QAbstractTableModel):
             self.dataChanged.emit(index, index)
             return True
         return False
+    
+    def flags(self, index):
+        return super().flags(index) | Qt.ItemIsEditable
+
     
 
     def sort(self, column, order=Qt.AscendingOrder):
@@ -69,6 +73,19 @@ class ExcelTableModel(QAbstractTableModel):
         self.endRemoveColumns()
         return True
     
+    def addColumn(self):
+        self.beginInsertColumns(QModelIndex(), len(self._headers), len(self._headers))
+        self._headers.append(f'Column {len(self._headers)}')
+        for row in self._data:
+            row.append('')
+        self.endInsertColumns()
+
+    def addRow(self):
+        self.beginInsertRows(QModelIndex(), len(self._data), len(self._data))
+        new_row = [''] * len(self._headers)
+        self._data.append(new_row)
+        self.endInsertRows()
+    
     def addData(self, new_data):
         self.layoutAboutToBeChanged.emit()
 
@@ -82,6 +99,21 @@ class ExcelTableModel(QAbstractTableModel):
             print(row)
         print()
 
+class SearchDialog(QDialog):
+    def __init__(self, parent=None):
+        super(SearchDialog, self).__init__(parent)
+
+        self.search_input = QLineEdit()
+        self.search_button = QPushButton('Search')
+        self.search_button.clicked.connect(self.search)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.search_input)
+        layout.addWidget(self.search_button)
+
+    def search(self):
+        search_term = self.search_input.text()
+        self.accept() 
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -90,21 +122,27 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Программа")
         self.resize(800, 600)
 
+        self.model = ExcelTableModel([], [])
+        self.setAcceptDrops(True)
+
         # Кнопки главного окна
         self.load_button = QPushButton("Загрузить базу данных")
         self.load_button.clicked.connect(self.load_data)
 
         self.search_button = QPushButton("Поиск")
-        self.search_button.clicked.connect(self.search_data)
+        self.search_button.clicked.connect(self.show_search_dialog)
+
+        self.filter_button = QPushButton("Фильтр по строке")
+        self.filter_button.clicked.connect(self.show_filter_dialog)
 
         self.plot_button = QPushButton("Построить график")
         self.plot_button.clicked.connect(self.plot_data)
 
-        self.add_button = QPushButton("Добавить данные")
-        self.add_button.clicked.connect(self.add_data)
+        self.addColumnButton = QPushButton('Добавить столбец')
+        self.addRowButton = QPushButton('Добавить колонку')
 
-        self.delete_button = QPushButton("Удалить данные")
-        self.delete_button.clicked.connect(self.delete_data)
+        self.addColumnButton.clicked.connect(self.add_column)
+        self.addRowButton.clicked.connect(self.add_row)
 
         self.save_button = QPushButton("Сохранить таблицу")
         self.save_button.clicked.connect(self.save_data)
@@ -113,6 +151,9 @@ class MainWindow(QMainWindow):
         self.table_view = QTableView()
         self.table_view.setSortingEnabled(True)
         self.table_view.setSelectionBehavior(QTableView.SelectColumns)
+        self.table_view.setAcceptDrops(True)
+        self.table_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_view.customContextMenuRequested.connect(self.show_context_menu)
 
         header_view = self.table_view.horizontalHeader()
         header_view.setSectionsClickable(True)
@@ -125,15 +166,130 @@ class MainWindow(QMainWindow):
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.load_button)
         button_layout.addWidget(self.search_button)
+        button_layout.addWidget(self.filter_button)
         button_layout.addWidget(self.plot_button)
-        button_layout.addWidget(self.add_button)
-        button_layout.addWidget(self.delete_button)
+        button_layout.addWidget(self.addColumnButton)
+        button_layout.addWidget(self.addRowButton)
         button_layout.addWidget(self.save_button)
 
         layout.addLayout(button_layout)
         layout.addWidget(self.table_view)
 
         self.setCentralWidget(central_widget)
+
+    def dragEnterEvent(self, event):
+        mime_data = event.mimeData()
+        if mime_data.hasUrls() and mime_data.urls()[0].toString().endswith('.xlsx'):
+            event.acceptProposedAction()
+                
+    def dropEvent(self, event):
+        mime_data = event.mimeData()
+        if mime_data.hasUrls():
+            file_path = mime_data.urls()[0].toLocalFile()
+            try:
+                data_frame = pd.read_excel(file_path)
+                data_headers = data_frame.columns.tolist()
+
+                self.model.beginResetModel()
+                self.model._data = data_frame.values.tolist()
+                self.model._headers = data_headers
+                self.model.endResetModel()
+                self.proxy_model = QSortFilterProxyModel()
+                self.proxy_model.setSourceModel(self.model)
+                self.table_view.setModel(self.proxy_model)
+
+            except Exception as e:
+                QMessageBox.warning(self, "Error", str(e))
+
+    def show_filter_dialog(self):
+        search_dialog = SearchDialog(self)
+        result = search_dialog.exec_()
+
+        if result == QDialog.Accepted:
+            search_term = search_dialog.search_input.text()
+            self.proxy_model.setFilterRegExp(search_term)
+            self.proxy_model.setFilterKeyColumn(-1) 
+
+    def show_search_dialog(self):
+            search_dialog = SearchDialog(self)
+            result = search_dialog.exec_()
+
+            if result == QDialog.Accepted:
+                search_term = search_dialog.search_input.text()
+
+                self.table_view.clearSelection()
+
+                for row in range(self.model.rowCount()):
+                    for col in range(self.model.columnCount()):
+                        index = self.model.index(row, col)
+                        item_text = index.data(Qt.DisplayRole).lower()
+
+                        if search_term.lower() == item_text:
+                            self.table_view.selectionModel().select(index, QItemSelectionModel.Select)
+
+    def show_context_menu(self, pos):
+        context_menu = QMenu(self)
+
+        add_column_action = QAction('Добавить столбец', self)
+        add_row_action = QAction('Добавить строку', self)
+        delete_row_action = QAction('Удалить столбец', self)
+        delete_column_action = QAction('Удалить строку', self)
+
+        delete_row_action.triggered.connect(self.delete_row)
+        delete_column_action.triggered.connect(self.delete_column)
+
+        add_column_action.triggered.connect(self.add_column_below)
+        add_row_action.triggered.connect(self.add_row_below)
+
+        context_menu.addAction(add_column_action)
+        context_menu.addAction(add_row_action)
+        context_menu.addAction(delete_row_action)
+        context_menu.addAction(delete_column_action)
+
+        context_menu.exec_(self.table_view.mapToGlobal(pos))
+
+    def add_column_below(self):
+        current_column = self.table_view.currentIndex().column() if self.table_view.currentIndex().isValid() else 0
+        column_name, ok = QInputDialog.getText(self, 'Добавить столбец', 'Введите название столбца:')
+        if ok and column_name:
+            self.model.beginInsertColumns(QModelIndex(), current_column + 1, current_column + 1)
+            self.model._headers.insert(current_column + 1, column_name)
+            for row in self.model._data:
+                row.insert(current_column + 1, '')
+            self.model.endInsertColumns()
+
+    def add_row_below(self):
+        current_row = self.table_view.currentIndex().row() if self.table_view.currentIndex().isValid() else 0
+        self.model.beginInsertRows(QModelIndex(), current_row + 1, current_row + 1)
+        new_row = [''] * len(self.model._headers)
+        self.model._data.insert(current_row + 1, new_row)
+        self.model.endInsertRows()
+    
+    def delete_row(self):
+        current_row = self.table_view.currentIndex().row() if self.table_view.currentIndex().isValid() else 0
+        if 0 <= current_row < self.model.rowCount():
+            self.model.beginRemoveRows(QModelIndex(), current_row, current_row)
+            del self.model._data[current_row]
+            self.model.endRemoveRows()
+
+    def delete_column(self):
+        current_column = self.table_view.currentIndex().column() if self.table_view.currentIndex().isValid() else 0
+        if 0 <= current_column < self.model.columnCount():
+            self.model.beginRemoveColumns(QModelIndex(), current_column, current_column)
+            del self.model._headers[current_column]
+            for row in self.model._data:
+                del row[current_column]
+            self.model.endRemoveColumns()
+
+    def add_column(self):
+        self.model.addColumn()
+
+    def add_row(self):
+        self.model.addRow()
+
+    def add_row(self):
+        self.model.addRow()
+
 
     def sortByColumn(self, logical_index):
         # Get the order of the current sorting
@@ -161,10 +317,11 @@ class MainWindow(QMainWindow):
                 data_frame = pd.read_excel(file_path)
                 data_headers = data_frame.columns.tolist()
 
-                # Создание кастомной модели данных на основе загруженного DataFrame
                 self.model = ExcelTableModel(data_frame.values.tolist(),data_headers)
+                self.proxy_model = QSortFilterProxyModel()
+                self.proxy_model.setSourceModel(self.model)
 
-                self.table_view.setModel(self.model)
+                self.table_view.setModel(self.proxy_model)
 
             except Exception as e:
                 QMessageBox.warning(self, "Ошибка", str(e))
@@ -208,26 +365,31 @@ class MainWindow(QMainWindow):
         """
         selected_columns = self.table_view.selectionModel().selectedColumns()
 
-        if len(selected_columns) >= 2:
+        if len(selected_columns) >= 1:
             model = self.table_view.model()
 
-            plt.figure()
+            fig, (ax_lines, ax_hist, ax_scatter) = plt.subplots(1, 3, figsize=(15, 5))
+
+
             for column in selected_columns:
                 column_index = column.column()
 
-                # Get header data for the selected column
                 key = model.headerData(column_index, Qt.Horizontal)
-
-                # Extract data for the specified column
                 column_data = [model.data(model.index(row, column_index)) for row in range(model.rowCount())]
+                ax_lines.plot(column_data, label=f'{key}')
+                ax_hist.hist(column_data, bins='auto', alpha=0.7, label=f'{key}')
+                ax_scatter.scatter(range(len(column_data)), column_data, label=f'{key}')
 
-                # Plot data
-                plt.plot(column_data, label=key)
 
-            plt.legend()
+            # Add legends to both subplots
+            ax_lines.legend()
+            ax_hist.legend()
+            ax_scatter.legend()
+
+            # Show figures
             plt.show()
         else:
-            QMessageBox.warning(self, "Внимание", "Выберите по крайней мере два столбца для построения графика.")
+            QMessageBox.warning(self, "Внимание", "Выберите столбец для построения графика.")
 
     def add_data(self):
         """
@@ -273,20 +435,6 @@ class MainWindow(QMainWindow):
 
         dialog.close()
 
-    def delete_data(self):
-        """
-        Удаление выбранных данных из таблицы.
-        """
-        selected_rows = self.table_view.selectionModel().selectedRows()
-
-        if len(selected_rows) > 0:
-            model = self.table_view.model()
-            model.drop(selected_rows, inplace=True)
-
-            self.table_view.setModel(ExcelTableModel(model))
-
-        else:
-            QMessageBox.warning(self, "Внимание", "Выберите строки для удаления.")
 
     def save_data(self):
         """
@@ -301,7 +449,7 @@ class MainWindow(QMainWindow):
             file_path = file_dialog.selectedFiles()[0]
 
             try:
-                model = self.table_view.model()
+                model = self.model
                 model.saveToExcel(file_path)
 
             except Exception as e:

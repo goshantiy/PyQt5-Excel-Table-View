@@ -364,7 +364,20 @@ class MainWindow(QMainWindow):
 
             strings, nums = zip(*valid_data)
 
+            plt.subplot(1, 3, 1)
             plt.bar(strings, nums)
+            plt.title('Bar Plot')
+
+            plt.subplot(1, 3, 2)
+            plt.plot(strings,nums)
+            plt.title('Plot')
+
+            plt.subplot(1, 3, 3)
+            plt.pie(nums, labels=strings, autopct='%1.1f%%', startangle=90)
+            plt.title('Pie Chart')
+
+            plt.tight_layout()
+
             plt.show()
         else:
             QMessageBox.warning(self, "Warning", "Select exactly two columns for plotting.")

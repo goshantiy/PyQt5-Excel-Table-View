@@ -3,6 +3,7 @@ import sys
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTableView, QDialog, QVBoxLayout, QHBoxLayout, QMessageBox, QFileDialog
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QItemSelectionModel, QMimeData
+import numbers
 import pandas as pd
 import matplotlib.pyplot as plt
 from PyQt5.QtWidgets import QPushButton, QWidget, QLineEdit, QInputDialog, QMenu, QAction
@@ -337,76 +338,36 @@ class MainWindow(QMainWindow):
 
             model.sort(sort_keys, Qt.AscendingOrder)
 
-    def search_data(self):
-        """
-        Поиск информации в выбранном столбце.
-        """
-        selected_columns = self.table_view.selectionModel().selectedColumns()
+     
+    def convert_to_numeric(self, value):
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None       
 
-        if len(selected_columns) > 0:
-            model = self.table_view.model()
-            search_column = model.headerData(selected_columns[0], Qt.Horizontal)
-
-            text, ok = QInputDialog.getText(self, "Поиск", "Введите значение для поиска:")
-
-            if ok:
-                result = model[model[search_column].astype(str).str.contains(text)]
-                if len(result) > 0:
-                    self.table_view.setModel(TableModel(result))
-                else:
-                    QMessageBox.information(self, "Поиск", "Совпадений не найдено.")
-
-        else:
-            QMessageBox.warning(self, "Внимание", "Выберите столбец для поиска.")
 
     def plot_data(self):
-        """
-        Построение графика на основе выбранных данных.
-        """
         selected_columns = self.table_view.selectionModel().selectedColumns()
 
-        if len(selected_columns) >= 1:
+        if len(selected_columns) == 2:
             model = self.table_view.model()
+            string_column_index = selected_columns[0].column()
+            snum_column_index = selected_columns[1].column()
 
-            # Create subplots
-            fig, (ax_lines, ax_hist, ax_scatter) = plt.subplots(1, 3, figsize=(15, 5))
+            string_data = [model.data(model.index(row, string_column_index)) for row in range(model.rowCount())]
+            num_data = [self.convert_to_numeric(model.data(model.index(row, snum_column_index))) for row in range(model.rowCount())]
+            valid_data = [(city, salary) for city, salary in zip(string_data, num_data) if isinstance(salary, numbers.Number)]
 
-            for column in selected_columns:
-                column_index = column.column()
+            if not valid_data:
+                QMessageBox.warning(self, "Warning", "No numeric salary data to plot.")
+                return
 
-                key = model.headerData(column_index, Qt.Horizontal)
-                column_data = [model.data(model.index(row, column_index)) for row in range(model.rowCount())]
+            strings, nums = zip(*valid_data)
 
-                # Line plot
-                ax_lines.plot(column_data, label=f'{key}')
-                ax_lines.set_title('Line Plot')
-                ax_lines.set_xlabel('Index')
-                ax_lines.set_ylabel('Value')
-
-                # Histogram
-                ax_hist.hist(column_data, bins='auto', alpha=0.7, label=f'{key}')
-                ax_hist.set_title('Histogram')
-                ax_hist.set_xlabel('Value')
-                ax_hist.set_ylabel('Frequency')
-
-                # Scatter plot
-                ax_scatter.scatter(range(len(column_data)), column_data, label=f'{key}')
-                ax_scatter.set_title('Scatter Plot')
-                ax_scatter.set_xlabel('Index')
-                ax_scatter.set_ylabel('Value')
-
-            # Add legends to subplots
-            ax_lines.legend()
-            ax_hist.legend()
-            ax_scatter.legend()
-
-            # Adjust layout
-            plt.tight_layout()
-
-            # Show figures
+            plt.bar(strings, nums)
             plt.show()
         else:
-            QMessageBox.warning(self, "Внимание", "Выберите столбец для построения графика.")
+            QMessageBox.warning(self, "Warning", "Select exactly two columns for plotting.")
 
     def add_data(self):
         """

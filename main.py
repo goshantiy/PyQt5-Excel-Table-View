@@ -368,23 +368,40 @@ class MainWindow(QMainWindow):
         if len(selected_columns) >= 1:
             model = self.table_view.model()
 
+            # Create subplots
             fig, (ax_lines, ax_hist, ax_scatter) = plt.subplots(1, 3, figsize=(15, 5))
-
 
             for column in selected_columns:
                 column_index = column.column()
 
                 key = model.headerData(column_index, Qt.Horizontal)
                 column_data = [model.data(model.index(row, column_index)) for row in range(model.rowCount())]
+
+                # Line plot
                 ax_lines.plot(column_data, label=f'{key}')
+                ax_lines.set_title('Line Plot')
+                ax_lines.set_xlabel('Index')
+                ax_lines.set_ylabel('Value')
+
+                # Histogram
                 ax_hist.hist(column_data, bins='auto', alpha=0.7, label=f'{key}')
+                ax_hist.set_title('Histogram')
+                ax_hist.set_xlabel('Value')
+                ax_hist.set_ylabel('Frequency')
+
+                # Scatter plot
                 ax_scatter.scatter(range(len(column_data)), column_data, label=f'{key}')
+                ax_scatter.set_title('Scatter Plot')
+                ax_scatter.set_xlabel('Index')
+                ax_scatter.set_ylabel('Value')
 
-
-            # Add legends to both subplots
+            # Add legends to subplots
             ax_lines.legend()
             ax_hist.legend()
             ax_scatter.legend()
+
+            # Adjust layout
+            plt.tight_layout()
 
             # Show figures
             plt.show()
